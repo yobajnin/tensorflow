@@ -24,6 +24,7 @@ limitations under the License.
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/core/stringpiece.h"
+#include "tensorflow/core/platform/cord.h"
 #include "tensorflow/core/platform/file_statistics.h"
 #include "tensorflow/core/platform/macros.h"
 #include "tensorflow/core/platform/platform.h"
@@ -138,10 +139,8 @@ class FileSystem {
   ///  * OK - no errors
   ///  * UNIMPLEMENTED - Some underlying functions (like GetChildren) are not
   ///                    implemented
-  /// The default implementation uses a combination of GetChildren, MatchPath
-  /// and IsDirectory.
   virtual Status GetMatchingPaths(const string& pattern,
-                                  std::vector<string>* results);
+                                  std::vector<string>* results) = 0;
 
   /// \brief Obtains statistics for the given path.
   virtual Status Stat(const string& fname, FileStatistics* stat) = 0;
@@ -254,7 +253,15 @@ class WritableFile {
   virtual ~WritableFile();
 
   /// \brief Append 'data' to the file.
-  virtual Status Append(const StringPiece& data) = 0;
+  virtual Status Append(StringPiece data) = 0;
+
+  // TODO(ebrevdo): Remove this ifdef when absl is updated.
+#if defined(PLATFORM_GOOGLE)
+  // \brief Append 'data' to the file.
+  virtual Status Append(const absl::Cord& cord) {
+    return errors::Unimplemented("Append(absl::Cord) is not implemented");
+  }
+#endif
 
   /// \brief Close the file.
   ///

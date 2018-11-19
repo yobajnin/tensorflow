@@ -18,6 +18,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import os
+import pickle
 import threading
 
 import numpy as np
@@ -97,6 +99,14 @@ class TFETest(test_util.TensorFlowTestCase):
     self.assertTrue(has_cpu_device)
     del ctx
 
+  def testAsyncBasic(self):
+    ctx = context.Context(execution_mode=context.ASYNC)
+    has_cpu_device = False
+    for x in ctx.devices():
+      has_cpu_device = has_cpu_device or 'CPU' in x
+    self.assertTrue(has_cpu_device)
+    del ctx
+
   def testRunMetadata(self):
     context.enable_run_metadata()
     t = constant_op.constant(1.0)
@@ -108,8 +118,7 @@ class TFETest(test_util.TensorFlowTestCase):
     cpu_stats = step_stats.dev_stats[0]
     self.assertEqual('/job:localhost/replica:0/task:0/device:CPU:0',
                      cpu_stats.device)
-    self.assertEqual(len(cpu_stats.node_stats), 1)
-    self.assertEqual(cpu_stats.node_stats[0].node_name, 'Add')
+    self.assertGreaterEqual(len(cpu_stats.node_stats), 1)
 
   def testShouldCopy(self):
     if not context.context().num_gpus():
@@ -177,6 +186,17 @@ class TFETest(test_util.TensorFlowTestCase):
     ctx = context.Context(config=config_pb2.ConfigProto(
         device_count={'GPU': 0}))
     self.assertEquals(0, ctx.num_gpus())
+
+  def testPickle(self):
+    tmp_dir = self.get_temp_dir()
+    fname = os.path.join(tmp_dir, 't.pickle')
+    with open(fname, 'wb') as f:
+      t = constant_op.constant(10.0)
+      pickle.dump(t, f)
+
+    with open(fname, 'rb') as f:
+      t = pickle.load(f)
+      self.assertAllEqual(t.numpy(), 10.0)
 
   def testTensorPlacement(self):
     if not context.context().num_gpus():
@@ -603,6 +623,42 @@ class TFETest(test_util.TensorFlowTestCase):
       self.assertEquals(typ, dtypes.float32)
       self.assertIsInstance(t, ops.EagerTensor)
 
+  def testConvertMixedEagerTensorsWithVariables(self):
+    var = resource_variable_ops.ResourceVariable(1.0)
+    types, tensors = execute_lib.convert_to_mixed_eager_tensors(
+        ['foo', var], context.context())
+    self.assertAllEqual([dtypes.string, dtypes.float32], types)
+    for t in tensors:
+      self.assertIsInstance(t, ops.EagerTensor)
+
+  def testSmallIntegerOpsForcedToCPU(self):
+    if not context.context().num_gpus():
+      self.skipTest('No GPUs found')
+
+    a = constant_op.constant((1, 2, 3, 4, 5), dtype=dtypes.int64)
+    b = constant_op.constant((2, 3, 4, 5, 6), dtype=dtypes.int64)
+    with context.device('gpu:0'):
+      c = a + b
+
+    # Op forced to CPU since all constants are integers and small.
+    self.assertEqual(c.device, '/job:localhost/replica:0/task:0/device:CPU:0')
+
+    a = array_ops.zeros((8, 10), dtype=dtypes.int64)
+    b = array_ops.ones((8, 10), dtype=dtypes.int64)
+
+    with context.device('gpu:0'):
+      c = a + b
+
+    # Op not forced to CPU since the tensors are larger than 64 elements.
+    self.assertEqual(c.device, '/job:localhost/replica:0/task:0/device:GPU:0')
+
+    a = constant_op.constant((1, 2, 3, 4, 5), dtype=dtypes.float32)
+    b = constant_op.constant((2, 3, 4, 5, 6), dtype=dtypes.float32)
+    with context.device('gpu:0'):
+      c = a + b
+
+    # Op not forced to CPU since the constants are not integers.
+    self.assertEqual(c.device, '/job:localhost/replica:0/task:0/device:GPU:0')
 
 class SendRecvTest(test_util.TensorFlowTestCase):
 
@@ -650,14 +706,26 @@ class SendRecvTest(test_util.TensorFlowTestCase):
     with ops.device('GPU:0'):
       t0 = constant_op.constant(1.0)
       self._send(t0, 't0', self.cpu_device)
-    self.assertAllEqual(
-        self._recv(dtypes.float32, 't0', gpu_device_name),
-        1.0)
-    self._send(constant_op.constant(2.0), 't1', gpu_device_name)
+    with ops.device('cpu:0'):
+      self.assertAllEqual(
+          self._recv(dtypes.float32, 't0', gpu_device_name),
+          1.0)
+      self._send(constant_op.constant(2.0), 't1', gpu_device_name)
     with ops.device('GPU:0'):
       self.assertAllEqual(
           self._recv(dtypes.float32, 't1', self.cpu_device),
           2.0)
+
+
+class EagerTensorCacheTest(test_util.TensorFlowTestCase):
+
+  def testCacheSkipsTensorsTooLarge(self):
+    cache = context._EagerTensorCache(max_items=100, max_tensor_size=3)
+    cache.put('1', array_ops.zeros((2, 2)))
+    self.assertEqual(cache.get('1'), None)
+
+    cache.put('2', array_ops.zeros((2)))
+    self.assertNotEqual(cache.get('2'), None)
 
 
 if __name__ == '__main__':

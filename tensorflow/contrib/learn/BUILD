@@ -79,16 +79,7 @@ py_library(
         "//tensorflow/python:variable_scope",
         "//tensorflow/python:variables",
         "//tensorflow/python:weights_broadcast_ops",
-        "//tensorflow/python/estimator",
         "//tensorflow/python/estimator:estimator_py",
-        "//tensorflow/python/estimator:export_export",
-        "//tensorflow/python/estimator:export_output",
-        "//tensorflow/python/estimator:inputs",
-        "//tensorflow/python/estimator:inputs_queues",
-        "//tensorflow/python/estimator:model_fn",
-        "//tensorflow/python/estimator:numpy_io",
-        "//tensorflow/python/estimator:pandas_io",
-        "//tensorflow/python/estimator:run_config",
         "//tensorflow/python/feature_column",
         "//tensorflow/python/feature_column:feature_column_py",
         "//tensorflow/python/ops/losses",
@@ -170,7 +161,7 @@ tf_py_test(
         "//tensorflow/python:training",
         "//tensorflow/python:util",
         "//tensorflow/python:variables",
-        "//tensorflow/python/estimator",
+        "//tensorflow/python/estimator:estimator_py",
     ],
 )
 
@@ -190,6 +181,7 @@ py_test(
     size = "small",
     srcs = ["python/learn/graph_actions_test.py"],
     srcs_version = "PY2AND3",
+    tags = ["no_windows"],  # TODO: needs investigation on Windows
     deps = [
         ":learn",
         "//tensorflow/contrib/framework:framework_py",
@@ -217,7 +209,7 @@ py_test(
         "//tensorflow/contrib/training:training_py",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:platform",
-        "//tensorflow/python/estimator:run_config",
+        "//tensorflow/python/estimator:estimator_py",
     ],
 )
 
@@ -242,7 +234,7 @@ py_test(
         "//tensorflow/python:summary",
         "//tensorflow/python:training",
         "//tensorflow/python:variables",
-        "//tensorflow/python/estimator",
+        "//tensorflow/python/estimator:estimator_py",
     ],
 )
 
@@ -256,7 +248,7 @@ py_test(
         "//tensorflow/core:protos_all_py",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:training",
-        "//tensorflow/python/estimator:run_config",
+        "//tensorflow/python/estimator:estimator_py",
     ],
 )
 
@@ -278,7 +270,11 @@ py_test(
     size = "medium",
     srcs = ["python/learn/estimators/estimator_test.py"],
     srcs_version = "PY2AND3",
-    tags = ["manual"],
+    tags = [
+        "manual",
+        "noasan",  # times out
+        "optonly",  # test is flaky without optimization.
+    ],
     deps = [
         ":learn",
         "//tensorflow/contrib/framework:framework_py",
@@ -407,6 +403,7 @@ py_test(
     srcs = ["python/learn/estimators/dnn_test.py"],
     shard_count = 4,
     srcs_version = "PY2AND3",
+    tags = ["notap"],
     deps = [
         ":learn",
         "//tensorflow/contrib/layers:layers_py",
@@ -428,6 +425,7 @@ py_test(
     name = "kmeans_test",
     size = "medium",
     srcs = ["python/learn/estimators/kmeans_test.py"],
+    shard_count = 4,
     srcs_version = "PY2AND3",
     tags = [
         "noasan",  # b/73741358
@@ -479,6 +477,7 @@ py_test(
     name = "state_saving_rnn_estimator_test",
     size = "medium",
     srcs = ["python/learn/estimators/state_saving_rnn_estimator_test.py"],
+    shard_count = 4,
     srcs_version = "PY2AND3",
     tags = ["noasan"],
     deps = [
@@ -611,7 +610,7 @@ py_test(
         "//tensorflow/python:control_flow_ops",
         "//tensorflow/python:session",
         "//tensorflow/python:training",
-        "//tensorflow/python/estimator:export_output",
+        "//tensorflow/python/estimator:estimator_py",
         "//tensorflow/python/saved_model:signature_constants",
         "@six_archive//:six",
     ],
@@ -737,7 +736,7 @@ py_test(
 
 tf_py_test(
     name = "graph_io_test",
-    size = "small",
+    size = "medium",
     srcs = ["python/learn/learn_io/graph_io_test.py"],
     additional_deps = [
         ":learn",
@@ -820,6 +819,7 @@ py_test(
     size = "small",
     srcs = ["python/learn/utils/saved_model_export_utils_test.py"],
     srcs_version = "PY2AND3",
+    tags = ["no_windows"],  # TODO: needs investigation on Windows
     deps = [
         ":learn",
         "//tensorflow/contrib/layers:layers_py",
@@ -873,16 +873,4 @@ py_binary(
         "//tensorflow/contrib/framework:framework_py",
         "//tensorflow/python:platform",
     ],
-)
-
-filegroup(
-    name = "all_files",
-    srcs = glob(
-        ["**/*"],
-        exclude = [
-            "**/METADATA",
-            "**/OWNERS",
-        ],
-    ),
-    visibility = ["//tensorflow:__subpackages__"],
 )

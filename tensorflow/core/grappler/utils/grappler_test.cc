@@ -30,22 +30,31 @@ GrapplerTest::GrapplerTest() {
   // optimizations interfering in the comparison.
   RewriterConfig* cfg =
       options_.config.mutable_graph_options()->mutable_rewrite_options();
-  cfg->set_constant_folding(RewriterConfig::OFF);
+  // TODO(rmlarsen): Add utility to generate config w/ all optimizers turned
+  // off.
   cfg->set_arithmetic_optimization(RewriterConfig::OFF);
+  cfg->set_constant_folding(RewriterConfig::OFF);
+  cfg->set_debug_stripper(RewriterConfig::OFF);
   cfg->set_dependency_optimization(RewriterConfig::OFF);
-  cfg->set_loop_optimization(RewriterConfig::OFF);
   cfg->set_function_optimization(RewriterConfig::OFF);
   cfg->set_layout_optimizer(RewriterConfig::OFF);
-  cfg->set_debug_stripper(RewriterConfig::OFF);
+  cfg->set_loop_optimization(RewriterConfig::OFF);
+  cfg->set_pin_to_host_optimization(RewriterConfig::OFF);
 }
 
 std::vector<Tensor> GrapplerTest::EvaluateNodes(
     const GraphDef& graph, const std::vector<string>& node_names) const {
+  return EvaluateNodes(graph, node_names, {});
+}
+
+std::vector<Tensor> GrapplerTest::EvaluateNodes(
+    const GraphDef& graph, const std::vector<string>& node_names,
+    const std::vector<std::pair<string, Tensor>>& inputs) const {
   std::unique_ptr<tensorflow::Session> session(NewSession(options_));
   TF_CHECK_OK(session->Create(graph));
   RunOptions run_options;
   std::vector<Tensor> output_tensors;
-  TF_CHECK_OK(session->Run(run_options, {}, node_names, node_names,
+  TF_CHECK_OK(session->Run(run_options, inputs, node_names, node_names,
                            &output_tensors, nullptr));
   TF_CHECK_OK(session->Close());
   return output_tensors;

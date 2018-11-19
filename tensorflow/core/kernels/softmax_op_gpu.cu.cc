@@ -13,6 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include "tensorflow/core/lib/strings/str_util.h"
 #if GOOGLE_CUDA
 
 #define EIGEN_USE_GPU
@@ -128,16 +129,17 @@ template <typename T>
 class SoftmaxOpGPU : public OpKernel {
  public:
   explicit SoftmaxOpGPU(OpKernelConstruction* context) : OpKernel(context) {
-    log_ = StringPiece(type_string()).starts_with("Log");
+    log_ = str_util::StartsWith(type_string(), "Log");
   }
 
   void Compute(OpKernelContext* context) override {
     const Tensor& logits_in_ = context->input(0);
-    auto logits_in = logits_in_.matrix<T>();
+    OP_REQUIRES(context, TensorShapeUtils::IsVectorOrHigher(logits_in_.shape()),
+                errors::InvalidArgument("logits must have >= 1 dimension, got ",
+                                        logits_in_.shape().DebugString()));
+    auto logits_in = logits_in_.flat_inner_dims<T>();
     const int rows = logits_in.dimension(0);
     const int cols = logits_in.dimension(1);
-    OP_REQUIRES(context, TensorShapeUtils::IsMatrix(logits_in_.shape()),
-                errors::InvalidArgument("logits must be 2-dimensional"));
     Tensor* softmax_out = nullptr;
     OP_REQUIRES_OK(context, context->forward_input_or_allocate_output(
                                 {0}, 0, logits_in_.shape(), &softmax_out));

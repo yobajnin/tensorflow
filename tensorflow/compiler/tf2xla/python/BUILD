@@ -2,6 +2,8 @@ licenses(["notice"])  # Apache 2.0
 
 package(
     default_visibility = [
+        "//learning/deepmind/public/wavenet/python:__subpackages__",
+        "//learning/deepmind/research/alphastar:__subpackages__",
         "//learning/tfx:__subpackages__",
         "//tensorflow:internal",
     ],
@@ -20,5 +22,14 @@ tf_py_clif_cc(
     ],
     deps = [
         "//tensorflow/compiler/tf2xla:xla_compiler",
+    ],
+)
+
+py_library(
+    name = "xla",
+    srcs = ["xla.py"],
+    deps = [
+        "//tensorflow/compiler/tf2xla/ops:gen_xla_ops",
+        "//tensorflow/compiler/xla:xla_data_proto_py",
     ],
 )

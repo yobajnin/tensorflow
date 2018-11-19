@@ -117,7 +117,8 @@ class TPUClusterResolverTest(test.TestCase):
         zone=None,
         tpu=['test-tpu-1'],
         credentials=None,
-        service=self.mock_service_client(tpu_map=tpu_map))
+        service=self.mock_service_client(tpu_map=tpu_map),
+        coordinator_name='coordinator')
 
     actual_cluster_spec = tpu_cluster_resolver.cluster_spec()
     expected_proto = """
@@ -131,6 +132,7 @@ class TPUClusterResolverTest(test.TestCase):
     }
     """ % tpu_cluster_resolver._coordinator_port
     self._verifyClusterSpecEquality(actual_cluster_spec, str(expected_proto))
+    self.assertEqual(tpu_cluster_resolver.master(), 'grpc://10.1.2.3:8470')
 
   @mock.patch.object(TPUClusterResolver, '_requestComputeMetadata',
                      mock_request_compute_metadata)
@@ -156,6 +158,51 @@ class TPUClusterResolverTest(test.TestCase):
     job { name: 'worker' tasks { key: 0 value: '10.1.2.3:8470' } }
     """
     self._verifyClusterSpecEquality(actual_cluster_spec, expected_proto)
+    self.assertEqual(tpu_cluster_resolver.master(), 'grpc://10.1.2.3:8470')
+
+  @mock.patch.object(TPUClusterResolver, '_requestComputeMetadata',
+                     mock_request_compute_metadata)
+  def testUnhealthyCloudTpu(self):
+    tpu_map = {
+        'projects/test-project/locations/us-central1-c/nodes/test-tpu-1': {
+            'ipAddress': '10.1.2.3',
+            'port': '8470',
+            'health': 'UNHEALTHY'
+        }
+    }
+
+    tpu_cluster_resolver = TPUClusterResolver(
+        project=None,
+        zone=None,
+        tpu='test-tpu-1',
+        coordinator_name=None,
+        credentials=None,
+        service=self.mock_service_client(tpu_map=tpu_map))
+
+    with self.assertRaises(RuntimeError):
+      tpu_cluster_resolver.cluster_spec()
+
+  @mock.patch.object(TPUClusterResolver, '_requestComputeMetadata',
+                     mock_request_compute_metadata)
+  def testNotReadyCloudTpu(self):
+    tpu_map = {
+        'projects/test-project/locations/us-central1-c/nodes/test-tpu-1': {
+            'ipAddress': '10.1.2.3',
+            'port': '8470',
+            'state': 'CREATING'
+        }
+    }
+
+    tpu_cluster_resolver = TPUClusterResolver(
+        project=None,
+        zone=None,
+        tpu='test-tpu-1',
+        coordinator_name=None,
+        credentials=None,
+        service=self.mock_service_client(tpu_map=tpu_map))
+
+    with self.assertRaises(RuntimeError):
+      tpu_cluster_resolver.cluster_spec()
 
   def testSimpleSuccessfulRetrieval(self):
     tpu_map = {
@@ -170,6 +217,7 @@ class TPUClusterResolverTest(test.TestCase):
         project='test-project',
         zone='us-central1-c',
         tpu=['test-tpu-1'],
+        coordinator_name='coordinator',
         coordinator_address='10.128.1.5:10203',
         credentials=None,
         service=self.mock_service_client(tpu_map=tpu_map))
@@ -180,6 +228,7 @@ class TPUClusterResolverTest(test.TestCase):
     job { name: 'worker' tasks { key: 0 value: '10.1.2.3:8470' } }
     """
     self._verifyClusterSpecEquality(actual_cluster_spec, expected_proto)
+    self.assertEqual(tpu_cluster_resolver.master(), 'grpc://10.1.2.3:8470')
 
   def testNewNetworkEndpointFormat(self):
     tpu_map = {
@@ -196,6 +245,7 @@ class TPUClusterResolverTest(test.TestCase):
         project='test-project',
         zone='us-central1-c',
         tpu='test-tpu-1',
+        coordinator_name='coordinator',
         coordinator_address='10.128.1.5:10203',
         credentials=None,
         service=self.mock_service_client(tpu_map=tpu_map))
@@ -239,7 +289,8 @@ class TPUClusterResolverTest(test.TestCase):
     tpu_cluster_resolver = TPUClusterResolver(
         tpu='test-tpu-1',
         credentials=None,
-        service=self.mock_service_client(tpu_map=tpu_map))
+        service=self.mock_service_client(tpu_map=tpu_map),
+        coordinator_name='coordinator')
 
     actual_cluster_spec = tpu_cluster_resolver.cluster_spec()
     expected_proto = """
@@ -256,6 +307,7 @@ class TPUClusterResolverTest(test.TestCase):
     }
     """ % tpu_cluster_resolver._coordinator_port
     self._verifyClusterSpecEquality(actual_cluster_spec, str(expected_proto))
+    self.assertEqual(tpu_cluster_resolver.master(), 'grpc://10.2.3.4:8470')
 
   def testPodResolutionNoCoordinator(self):
     tpu_map = {
@@ -302,6 +354,7 @@ class TPUClusterResolverTest(test.TestCase):
     }
     """
     self._verifyClusterSpecEquality(actual_cluster_spec, expected_proto)
+    self.assertEqual(tpu_cluster_resolver.master(), 'grpc://10.2.3.4:8470')
 
   def testGetMasterNoEntries(self):
     tpu_map = {}
@@ -352,21 +405,125 @@ class TPUClusterResolverTest(test.TestCase):
     tpu_cluster_resolver = TPUClusterResolver(tpu='/bns/foo/bar')
     self.assertEqual(
         compat.as_bytes('/bns/foo/bar'), tpu_cluster_resolver.master())
-    self.assertEqual(
-        server_lib.ClusterSpec({}), tpu_cluster_resolver.cluster_spec())
+    self.assertEqual(None, tpu_cluster_resolver.cluster_spec())
 
-  def testGkeEnvironment(self):
+  def testGkeEnvironmentForDonut(self):
     os.environ['KUBE_GOOGLE_CLOUD_TPU_ENDPOINTS'] = 'grpc://10.120.27.5:8470'
-    self.assertTrue('KUBE_GOOGLE_CLOUD_TPU_ENDPOINTS' in os.environ)
+
+    self.assertIn('KUBE_GOOGLE_CLOUD_TPU_ENDPOINTS', os.environ)
+    self.assertTrue(TPUClusterResolver._inGke())
+    self.assertEqual(
+        compat.as_bytes('grpc://10.120.27.5:8470'),
+        compat.as_bytes(TPUClusterResolver._gkeEndpoints()))
+
     tpu_cluster_resolver = TPUClusterResolver()
-    self.assertTrue(tpu_cluster_resolver._inGke())
     self.assertEqual(
         compat.as_bytes('grpc://10.120.27.5:8470'),
-        compat.as_bytes(tpu_cluster_resolver._gkeMaster()))
-    self.assertEqual(
-        compat.as_bytes('grpc://10.120.27.5:8470'),
-        compat.as_bytes(tpu_cluster_resolver.get_master()))
+        compat.as_bytes(tpu_cluster_resolver.master()))
+    actual_cluster_spec = tpu_cluster_resolver.cluster_spec()
+    expected_proto = """
+    job {
+      name: 'worker'
+      tasks { key: 0 value: '10.120.27.5:8470' }
+    }
+    """
+    self._verifyClusterSpecEquality(actual_cluster_spec, expected_proto)
+
     del os.environ['KUBE_GOOGLE_CLOUD_TPU_ENDPOINTS']
+
+  def testGkeEnvironmentForPod(self):
+    os.environ['KUBE_GOOGLE_CLOUD_TPU_ENDPOINTS'] = ('grpc://10.120.27.5:8470,'
+                                                     'grpc://10.120.27.6:8470,'
+                                                     'grpc://10.120.27.7:8470,'
+                                                     'grpc://10.120.27.8:8470')
+
+    self.assertIn('KUBE_GOOGLE_CLOUD_TPU_ENDPOINTS', os.environ)
+    self.assertTrue(TPUClusterResolver._inGke())
+    self.assertEqual(
+        compat.as_bytes('grpc://10.120.27.5:8470,'
+                        'grpc://10.120.27.6:8470,'
+                        'grpc://10.120.27.7:8470,'
+                        'grpc://10.120.27.8:8470'),
+        compat.as_bytes(TPUClusterResolver._gkeEndpoints()))
+
+    tpu_cluster_resolver = TPUClusterResolver()
+    self.assertEqual(
+        compat.as_bytes('grpc://10.120.27.5:8470'),
+        compat.as_bytes(tpu_cluster_resolver.master()))
+    actual_cluster_spec = tpu_cluster_resolver.cluster_spec()
+    expected_proto = """
+    job {
+      name: 'worker'
+      tasks { key: 0 value: '10.120.27.5:8470' }
+      tasks { key: 1 value: '10.120.27.6:8470' }
+      tasks { key: 2 value: '10.120.27.7:8470' }
+      tasks { key: 3 value: '10.120.27.8:8470' }
+    }
+    """
+    self._verifyClusterSpecEquality(actual_cluster_spec, expected_proto)
+
+    del os.environ['KUBE_GOOGLE_CLOUD_TPU_ENDPOINTS']
+
+  def testEnvironmentDiscoveryUrl(self):
+    os.environ['TPU_API_DISCOVERY_URL'] = 'https://{api}.internal/{apiVersion}'
+    self.assertEqual('https://{api}.internal/{apiVersion}',
+                     TPUClusterResolver._environmentDiscoveryUrl())
+
+  def testEnvironmentAndRpcDetectionForGoogle(self):
+    tpu_cluster_resolver = TPUClusterResolver(tpu='/bns/ab/cd/ef')
+    self.assertEqual(tpu_cluster_resolver.environment, 'google')
+    self.assertEqual(tpu_cluster_resolver.rpc_layer, None)
+
+  def testEnvironmentAndRpcDetectionForGrpcString(self):
+    tpu_cluster_resolver = TPUClusterResolver(tpu='grpc://10.1.2.3:8470')
+    self.assertEqual(tpu_cluster_resolver.environment, '')
+    self.assertEqual(tpu_cluster_resolver.rpc_layer, 'grpc')
+    self.assertEqual(tpu_cluster_resolver.master(), 'grpc://10.1.2.3:8470')
+
+  def testOverrideTaskTypeAndIndexAndGetMaster(self):
+    tpu_map = {
+        'projects/test-project/locations/us-central1-c/nodes/test-tpu-1': {
+            'health':
+                'HEALTHY',
+            'networkEndpoints': [
+                {
+                    'ipAddress': '10.2.3.4',
+                    'port': 8470,
+                },
+                {
+                    'ipAddress': '10.2.3.5',
+                    'port': 8470,
+                },
+                {
+                    'ipAddress': '10.2.3.6',
+                    'port': 8470,
+                },
+                {
+                    'ipAddress': '10.2.3.7',
+                    'port': 8470,
+                },
+            ]
+        }
+    }
+
+    tpu_cluster_resolver = TPUClusterResolver(
+        project='test-project',
+        zone='us-central1-c',
+        tpu='test-tpu-1',
+        coordinator_name=None,
+        credentials=None,
+        service=self.mock_service_client(tpu_map=tpu_map))
+
+    self.assertEqual(tpu_cluster_resolver.master(), 'grpc://10.2.3.4:8470')
+
+    tpu_cluster_resolver.task_type = 'worker'
+    tpu_cluster_resolver.task_index = 3
+    self.assertEqual(tpu_cluster_resolver.master(), 'grpc://10.2.3.7:8470')
+
+    self.assertEqual(
+        tpu_cluster_resolver.master(
+            task_type='worker', task_index=2, rpc_layer='test'),
+        'test://10.2.3.6:8470')
 
 
 if __name__ == '__main__':
